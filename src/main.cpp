@@ -49,9 +49,10 @@ static const uint32_t RS485_BAUD = 115200;
 
 // RS485 Sende-Timing (Treiber-Umschaltung).
 // TPRE = Wartezeit vor Senden (DIR auf TX), TPOST = Wartezeit nach Senden (DIR zurueck).
-// Wenn Frames abgeschnitten/vermurkst wirken: diese Werte leicht erhoehen (z.B. 200..300 µs).
-static const uint16_t RS485_TPRE_US  = 150;
-static const uint16_t RS485_TPOST_US = 150;
+// Halbduplex: nach TX muss der Wandler sicher im RX sein, bevor der Master antwortet —
+// zu kurz -> Kollisionen / keine ACKs (Master sendete frueher ohne Inter-Frame-Gap).
+static const uint16_t RS485_TPRE_US  = 550;
+static const uint16_t RS485_TPOST_US = 550;
 
 // Groesserer HardwareSerial-RX-Puffer fuer Serial1.
 // Der Wert wird absichtlich VOR rs485.begin() gesetzt, damit die UART auch bei
@@ -471,9 +472,10 @@ static uint32_t g_stallMinCounts = 10;
 // Feinphase: wie lange die aktive Bremse gehalten wird (ms), wenn wir Ziel erreicht/ueberfahren haben
 static uint32_t g_fineBrakeHoldMs = 80;
 
-// Feinphase: optional "vor dem Ziel" bremsen (0,01deg).
-// 0 => erst bremsen, wenn err<=0 (Ziel erreicht/ueberschritten, einseitig).
-static int32_t g_fineBrakeLeadDeg01 = 0;
+// Feinphase: optional "vor dem Ziel" bremsen (0,01deg), gueltig fuer + und - Richtung.
+// 0 => nur noch bei err<=0 bremsen (spaet, viel Schwung bei kurzen Minus-Schritten).
+// ~100..150 (1,0..1,5deg): Vorab-Bremse, weniger Ueberschiessen bei 1..2deg-Schritten.
+static int32_t g_fineBrakeLeadDeg01 = 120;
 
 
 // PWM Max (%): Harte PWM-Grenze fuer Positionsfahrten (SETPOSDG).

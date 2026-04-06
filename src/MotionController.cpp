@@ -1821,9 +1821,19 @@ _speedCmdRampDegPerSec = 0.0f;
     startBrake = true;
   }
   // 2) Optional: kurz VOR dem Ziel bremsen (nur im normalen Modus, nicht im Exakt-Modus)
-  else if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && errDeg01 > 0 && errDeg01 <= fineBrakeLeadDeg01) {
-    // Lead-Bremsen nur EINMAL ausloesen, sonst kann er kurz vor dem Ziel stehen bleiben
-    // und permanent wieder in den Brems-Hold springen.
+  //
+  // errDeg01 = tgt - cur (linear, ohne Wrap):
+  // - Fahrt mit _moveDir > 0: Ist liegt noch UNTER dem Ziel -> err > 0 bis zum Treffer.
+  //   Lead: 0 < err <= fineBrakeLeadDeg01 (bisheriger Fall).
+  // - Fahrt mit _moveDir < 0: Ist liegt noch UEBER dem Ziel -> err < 0 bis zum Treffer.
+  //   Lead: -fineBrakeLeadDeg01 <= err < 0 (fehlte bisher -> Inertia schoss mehrere Grad ueber).
+  else if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir > 0 && errDeg01 > 0 &&
+           errDeg01 <= fineBrakeLeadDeg01) {
+    if (!_fineLeadBrakeUsed) {
+      startBrake = true;
+    }
+  } else if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir < 0 && errDeg01 < 0 &&
+             errDeg01 >= -fineBrakeLeadDeg01) {
     if (!_fineLeadBrakeUsed) {
       startBrake = true;
     }
@@ -1835,9 +1845,11 @@ _speedCmdRampDegPerSec = 0.0f;
     _motorBrakeRequested = true;
 
     // Wenn der Trigger das Lead-Bremsen war: merken, dass wir es schon genutzt haben.
-    // In dieser Branch sind wir NICHT in der Ankunftsbedingung, sondern im "Lead" vor dem Ziel
-    // (err>0). Dann darf das Lead-Bremsen nur einmal ausgeloest werden.
-    if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && errDeg01 > 0 && errDeg01 <= fineBrakeLeadDeg01) {
+    if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir > 0 && errDeg01 > 0 &&
+        errDeg01 <= fineBrakeLeadDeg01) {
+      _fineLeadBrakeUsed = true;
+    } else if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir < 0 && errDeg01 < 0 &&
+               errDeg01 >= -fineBrakeLeadDeg01) {
       _fineLeadBrakeUsed = true;
     }
 
@@ -1885,6 +1897,24 @@ _speedCmdRampDegPerSec = 0.0f;
 
     finePwmAbsEff = finePwmAbs + (boostSlewPerSec * t);
     finePwmAbsEff = clampFloat(finePwmAbsEff, finePwmAbs, maxFineAbs);
+  }
+
+  // Kurze Fahrten (1..2deg) liegen oft komplett im Feinfenster: volles Creep-PWM ist zu viel
+  // Schwung, v.a. in Minus-Richtung (mehr Nachlauf, dann Korrektur zurueck).
+  // Skalierung nach Restfehler relativ zur Feinzone; Wurzel = nahe am Ziel staerker drosseln.
+  if (fineWinDeg01 > 0) {
+    float ratio = (float)absErrDeg01 / (float)fineWinDeg01;
+    if (ratio > 1.0f) ratio = 1.0f;
+    float scale = sqrtf(ratio);
+    if (_moveDir < 0) {
+      scale *= 0.78f;
+    }
+    if (scale < 0.25f) scale = 0.25f;
+    finePwmAbsEff *= scale;
+    const float floorAbs = fmaxf(5.0f, finePwmAbs * 0.22f);
+    if (finePwmAbsEff < floorAbs) {
+      finePwmAbsEff = floorAbs;
+    }
   }
 
   const int8_t dir = (errDeg01 > 0) ? +1 : (errDeg01 < 0 ? -1 : 0);

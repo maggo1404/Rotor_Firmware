@@ -451,6 +451,7 @@ void Rs485Proto::sendFrame(uint8_t src, uint8_t dst, const String& cmd, const St
   delayMicroseconds(_tPostUs);
   setTxMode(false);
   xSemaphoreGive(_ioMutex);
+  taskYIELD();
 }
 
 void Rs485Proto::sendPayloadFrame(uint8_t src, uint8_t dst, const String& payload) {
@@ -487,4 +488,5 @@ void Rs485Proto::sendPayloadFrame(uint8_t src, uint8_t dst, const String& payloa
   delayMicroseconds(_tPostUs);
   setTxMode(false);
   xSemaphoreGive(_ioMutex);
+  taskYIELD();
 }

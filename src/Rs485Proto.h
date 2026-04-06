@@ -66,7 +66,7 @@ private:
   static constexpr size_t RX_RAW_FRAME_MAX = 224;
   // Tiefe RX-Queue: bei Bus-Flut (Master-Polling + Wetter + GETPOS) verhindert
   // zu kleine Queues verworfene Telegramme (Master sieht dann „kein ACK“).
-  static constexpr UBaseType_t RX_QUEUE_LENGTH = 96;
+  static constexpr UBaseType_t RX_QUEUE_LENGTH = 128;
 
   struct RxQueuedLine {
     char text[RX_RAW_FRAME_MAX];
