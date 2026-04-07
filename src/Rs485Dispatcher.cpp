@@ -1229,7 +1229,7 @@ void Rs485Dispatcher::handleCommand(const Rs485Frame& f, uint32_t nowMs) {
   }
 
   // ------------------------------------------------------------------------
-  // Statistiken/Schwellwerte fuer LoadMonitor
+  // Statistiken/Schwellwerte fuer LoadMonitor (wie Etappe2: ramp/cal/acc/smm)
   // ------------------------------------------------------------------------
   if (cmd == "GETCALIGNDG") {
     const float v = (_cfg.calIgnoreRampDeg) ? *_cfg.calIgnoreRampDeg : 10.0f;
@@ -1268,7 +1268,6 @@ void Rs485Dispatcher::handleCommand(const Rs485Frame& f, uint32_t nowMs) {
   if (cmd == "SETRAPDG") {
     float v = parseFloatParam(f.params);
     if (v < 0.0f) v = 0.0f;
-    if (v > 60.0f) v = 60.0f;
     persistPutFloat("rap", _cfg.accIgnoreRampDeg, v);
     if (shouldReply) sendAck(f.master, "SETRAPDG", "1");
     serialEventState("SETRAPDG");
@@ -2201,7 +2200,7 @@ void Rs485Dispatcher::handleCommand(const Rs485Frame& f, uint32_t nowMs) {
   }
 
   // ------------------------------------------------------------------------
-  // Rampenlaenge (Grad)
+  // Rampenlaenge (Grad): Regler; Live-Bins: max(ramp, SETCALIGNDG). GETACCBINS: SETRAPDG.
   // ------------------------------------------------------------------------
   if (cmd == "GETRAMP") {
     const float v = (_cfg.rampDistDeg) ? *_cfg.rampDistDeg : 0.0f;

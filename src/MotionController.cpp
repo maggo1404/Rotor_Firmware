@@ -1361,7 +1361,7 @@ const float errDeg = (float)errDeg01 / 100.0f;
 //
 // Uebergang zur Feinphase:
 // - Die Abbremsrampe laeuft auf finePwmAbs aus (wenn fineWindow aktiv ist).
-// - In der Feinphase uebernimmt dann der vorhandene Creep+Bremse-Code.
+// - In der Feinphase: konstantes Min-PWM Richtung Ziel, Korrektur bei Ueberfahren, kein Zwischen-Bremse.
 
 // Restweg wie bisher: normal |Fehler|, bei Bremsfahrt nur in Bremsrichtung
 float remainingDeg = absErrDeg;
@@ -1399,15 +1399,6 @@ if (!brakingNow) {
 // Damit stoppen wir in der Feinphase nur dann hart mit LOW/LOW, wenn der Istwert
 // das Soll erreicht oder leicht positiv ueberschritten hat. Unterhalb des Solls
 // wird niemals "angekommen" gemeldet.
-const bool hitTolWindowNow = (errDeg01 <= 0) && (errDeg01 >= -arriveTolDeg01);
-
-// Einseitige Ankunft (fuer Feinphase-Bremse)
-const bool arriveOneSidedNowRaw = hitTolWindowNow;
-// Joerg: Einseitiges Ankommen ist IMMER aktiv (Ring und Axis).
-// Wir wollen nie "unter" das Soll zurueckkorrigieren, weil sonst bei der 0,1°-Anzeige
-// die erste Nachkommastelle kippen kann (z.B. 60,60 -> 60,59).
-// Darum ist "ankommen" immer: cur >= tgt und innerhalb der Toleranz (max. +tol).
-const bool arriveForFineBrakeNow = arriveOneSidedNowRaw;
 
 // PWM Limits
 const float pwmMax = pwmMaxEff;
@@ -1664,276 +1655,45 @@ _speedCmdDegPerSec = 0.0f;
 _speedCmdRampDegPerSec = 0.0f;
 
   // ------------------------------------------------------------
-  // Feinphase (Joerg): Creep-PWM + aktive Bremse (beide Ausgaenge HIGH)
-// ------------------------------------------------------------
-// In der Feinphase nutzen wir bewusst KEINEN Speed-PI mehr, weil:
-// - vMeas bei sehr kleinen Geschwindigkeiten stark quantisiert / unruhig ist
-// - Integrator in Zielnaehe gerne "drueckt" und dadurch Ueberschwingen + Rueckfahrt erzeugt
-//
-// Stattdessen:
-// - konstantes, langsames PWM (finePwmAbs) in Richtung des Positionsfehlers
-// - sobald Ziel erreicht/ueberschritten (einseitig) ODER optional kurz davor (Lead):
-//   Motorbremse anfordern und kurz halten
+  // Feinphase (vereinfacht): Min-PWM aus Rampe/kurzer Strecke bis zum Ziel
+  // ------------------------------------------------------------
+  // errDeg01 > 0  -> noch vor Soll: +MinPWM; im Fenster [-tol,0]: PWM 0 (Auslauf, Ankunft oben);
+  // errDeg01 < -tol -> zu weit ueberfahren: -MinPWM. Kein Boost/sqrt/Bremse-Zwischenstopps.
   if (!brakingNow && fineActive) {
-  const float pwmMax = pwmMaxEff;
+    const float pwmMaxFine = pwmMaxEff;
 
-  float finePwmAbs = (_cfg.finePwmAbs) ? (*_cfg.finePwmAbs) : 12.0f;
-  if (finePwmAbs < 0.0f) finePwmAbs = -finePwmAbs;
-  if (finePwmAbs > pwmMax) finePwmAbs = pwmMax;
+    float finePwmAbs = (_cfg.finePwmAbs) ? (*_cfg.finePwmAbs) : 12.0f;
+    if (finePwmAbs < 0.0f) finePwmAbs = -finePwmAbs;
+    if (finePwmAbs > pwmMaxFine) finePwmAbs = pwmMaxFine;
 
-  // Wenn in der Feinphase das PWM zu klein ist, kann der Motor "kleben" (Haftreibung).
-  // Darum sorgen wir dafuer, dass finePwmAbs mindestens so gross ist wie die Losbrechhilfe.
-  float kickMinAbs = (_cfg.pwmKickMinAbs) ? (*_cfg.pwmKickMinAbs) : 0.0f;
-  if (kickMinAbs < 0.0f) kickMinAbs = -kickMinAbs;
-  if (kickMinAbs > finePwmAbs) finePwmAbs = kickMinAbs;
-  if (finePwmAbs > pwmMax) finePwmAbs = pwmMax;
+    // finePwmAbs mindestens Losbrechhilfe (typisch g_minPwm)
+    float kickMinAbs = (_cfg.pwmKickMinAbs) ? (*_cfg.pwmKickMinAbs) : 0.0f;
+    if (kickMinAbs < 0.0f) kickMinAbs = -kickMinAbs;
+    if (kickMinAbs > finePwmAbs) finePwmAbs = kickMinAbs;
+    if (finePwmAbs > pwmMaxFine) finePwmAbs = pwmMaxFine;
 
-  const uint32_t fineBrakeHoldMs = (_cfg.fineBrakeHoldMs) ? (*_cfg.fineBrakeHoldMs) : 80;
-  int32_t fineBrakeLeadDeg01 = (_cfg.fineBrakeLeadDeg01) ? (*_cfg.fineBrakeLeadDeg01) : 0;
-  if (fineBrakeLeadDeg01 < 0) fineBrakeLeadDeg01 = -fineBrakeLeadDeg01;
-
-  // ----------------------------------------------------------
-  // LOW-Stop-Hold im Ziel-/Toleranzfenster
-  // ----------------------------------------------------------
-  // Sobald das Toleranzfenster getroffen wird, schalten wir in der Feinphase
-  // nicht weiter mit Creep-PWM nach, sondern geben 0 PWM aus. In der INO fuehrt
-  // das zu stopPwm() => beide H-Bruecken LOW.
-  //
-  // Das ist bewusst etwas "haerter" als das bisherige Anschleichen, weil wir
-  // keine zusaetzlichen Mikrokorrekturen mehr erzeugen, solange der Treffer im
-  // Fenster bereits gueltig ist.
-  if (_fineLowStopHoldActive) {
     _motorBrakeRequested = false;
 
-    if ((nowMs - _fineLowStopHoldStartMs) < fineBrakeHoldMs) {
-      _iTermPwm = 0.0f;
-      _pTermPwm = 0.0f;
-      _speedCmdDegPerSec = 0.0f;
-      _speedCmdRampDegPerSec = 0.0f;
-
-      _lastAppliedDuty = 0.0f;
-      return 0.0f;
-    }
-
-    _fineLowStopHoldActive = false;
-
-    // Nach dem LOW-Hold ist die Bewegung idealerweise bereits ausgerollt.
-    // Bleiben wir im Ziel-/Toleranzfenster, ist die Fahrt beendet.
-    if (hitTolWindowNow) {
-      if (_pendingHasTarget) {
-        const int32_t nextTgt = _pendingTargetDeg01;
-        const bool nextSoft = _pendingSoftStart;
-
-        _pendingHasTarget = false;
-        _pendingTargetDeg01 = 0;
-        _pendingSoftStart = false;
-
-        resetControllerState(nowMs);
-        _lastAppliedDuty = 0.0f;
-
-        (void)nextSoft;
-        commandSetPosDeg01(nextTgt, nowMs);
-        return 0.0f;
-      }
-
-      resetControllerState(nowMs);
-      _lastAppliedDuty = 0.0f;
-      return 0.0f;
-    }
-  }
-
-  // Wenn wir das Ziel-/Toleranzfenster gerade treffen, sofort mit LOW stoppen.
-  // Damit verhindern wir, dass die Feinphase noch ueber das Ziel hinausschiebt.
-  if (hitTolWindowNow) {
-    _fineLowStopHoldActive = true;
-    _fineLowStopHoldStartMs = nowMs;
-    _motorBrakeRequested = false;
-
-    _iTermPwm = 0.0f;
-    _pTermPwm = 0.0f;
-    _speedCmdDegPerSec = 0.0f;
-    _speedCmdRampDegPerSec = 0.0f;
-
-    _lastAppliedDuty = 0.0f;
-    return 0.0f;
-  }
-
-  // Wenn wir gerade in einem Brake-Hold sind: Bremse aktiv halten
-  if (_fineBrakeHoldActive) {
-    if ((nowMs - _fineBrakeHoldStartMs) < fineBrakeHoldMs) {
-      _motorBrakeRequested = true;
-
-      // Reglerzustaende beruhigen (wir fahren in der Feinphase open-loop)
-      _iTermPwm = 0.0f;
-      _pTermPwm = 0.0f;
-      _speedCmdDegPerSec = 0.0f;
-      _speedCmdRampDegPerSec = 0.0f;
-
-      _lastAppliedDuty = 0.0f;
-      return 0.0f;
+    float uCmdFine;
+    if (errDeg01 > 0) {
+      uCmdFine = finePwmAbs;
+    } else if (errDeg01 < -arriveTolDeg01) {
+      uCmdFine = -finePwmAbs;
     } else {
-      // Hold fertig
-      _fineBrakeHoldActive = false;
-      _motorBrakeRequested = false;
-
-      // Joerg: Kein "Exakt-Nachsetzen" in Zielnaehe.
-      // Wir duerfen nicht unter das Soll zurueckfahren (sonst kippt die 0,1°-Anzeige
-      // und es kommt zum Pendeln). Darum:
-      // - Wenn wir einseitig angekommen sind (cur >= tgt und innerhalb der Toleranz): fertig.
-      // - Wenn es nur ein Lead-Bremsen vor dem Ziel war: weiter in der Creep-Logik.
-      _fineExactMode = false;
-      _fineExactRetryCount = 0;
-      if (arriveOneSidedNowRaw) {
-        // Ziel einseitig erreicht (cur >= tgt innerhalb Toleranz).
-        // Wenn waehrend der Fahrt ein neues Ziel vorgemerkt wurde (pending),
-        // soll es danach sofort ganz normal (mit Rampen) angefahren werden.
-        if (_pendingHasTarget) {
-          const int32_t nextTgt = _pendingTargetDeg01;
-          const bool nextSoft = _pendingSoftStart;
-
-          // pending vor Reset loeschen (Reset wuerde es ohnehin loeschen)
-          _pendingHasTarget = false;
-          _pendingTargetDeg01 = 0;
-          _pendingSoftStart = false;
-
-          resetControllerState(nowMs);
-          _lastAppliedDuty = 0.0f;
-
-          // Naechstes Ziel wie aus Stillstand starten.
-          (void)nextSoft; // aktuell ungenutzt
-          commandSetPosDeg01(nextTgt, nowMs);
-          return 0.0f;
-        }
-
-        resetControllerState(nowMs);
-        _lastAppliedDuty = 0.0f;
-        return 0.0f;
-      }
-
-    }
-  }
-
-  // Start-Entscheidung: wann bremsen?
-  bool startBrake = false;
-
-  // 1) Ziel erreicht? -> bremsen
-  if (arriveForFineBrakeNow) {
-    startBrake = true;
-  }
-  // 2) Optional: kurz VOR dem Ziel bremsen (nur im normalen Modus, nicht im Exakt-Modus)
-  //
-  // errDeg01 = tgt - cur (linear, ohne Wrap):
-  // - Fahrt mit _moveDir > 0: Ist liegt noch UNTER dem Ziel -> err > 0 bis zum Treffer.
-  //   Lead: 0 < err <= fineBrakeLeadDeg01 (bisheriger Fall).
-  // - Fahrt mit _moveDir < 0: Ist liegt noch UEBER dem Ziel -> err < 0 bis zum Treffer.
-  //   Lead: -fineBrakeLeadDeg01 <= err < 0 (fehlte bisher -> Inertia schoss mehrere Grad ueber).
-  else if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir > 0 && errDeg01 > 0 &&
-           errDeg01 <= fineBrakeLeadDeg01) {
-    if (!_fineLeadBrakeUsed) {
-      startBrake = true;
-    }
-  } else if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir < 0 && errDeg01 < 0 &&
-             errDeg01 >= -fineBrakeLeadDeg01) {
-    if (!_fineLeadBrakeUsed) {
-      startBrake = true;
-    }
-  }
-
-  if (startBrake) {
-    _fineBrakeHoldActive = true;
-    _fineBrakeHoldStartMs = nowMs;
-    _motorBrakeRequested = true;
-
-    // Wenn der Trigger das Lead-Bremsen war: merken, dass wir es schon genutzt haben.
-    if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir > 0 && errDeg01 > 0 &&
-        errDeg01 <= fineBrakeLeadDeg01) {
-      _fineLeadBrakeUsed = true;
-    } else if (!_fineExactMode && fineBrakeLeadDeg01 > 0 && _moveDir < 0 && errDeg01 < 0 &&
-               errDeg01 >= -fineBrakeLeadDeg01) {
-      _fineLeadBrakeUsed = true;
+      uCmdFine = 0.0f;
     }
 
-    // Reglerzustaende beruhigen
+    const float fineSlewPerSec = 220.0f;
+    const float dutyOutFine = applyPwmSlewCustom(uCmdFine, _lastAppliedDuty, dtMs, fineSlewPerSec);
+    _lastAppliedDuty = dutyOutFine;
+
     _iTermPwm = 0.0f;
     _pTermPwm = 0.0f;
     _speedCmdDegPerSec = 0.0f;
     _speedCmdRampDegPerSec = 0.0f;
 
-    _lastAppliedDuty = 0.0f;
-    return 0.0f;
+    return dutyOutFine;
   }
-
-  // Creep: konstantes PWM in Richtung des Fehlers
-  // Joerg: Wenn der Motor in der Feinphase "klebt" (Haftreibung), reicht ein fixes PWM evtl. nicht aus.
-  // Wir nutzen deshalb die vorhandene Stillstands-Erkennung (_noMoveSinceMs) und erhoehen das PWM
-  // automatisch, solange keine Encoder-Bewegung erkannt wird.
-  //
-  // Ohne zusaetzlichen Parameter:
-  // - nach kurzer Stillstandszeit rampen wir das PWM nach oben
-  // - Obergrenze haengt vom Restfehler ab (nahe am Ziel weniger "Kick" -> weniger Ueberschwingen)
-  const uint32_t fineNoMoveKickMs = 120; // nach 120ms ohne Bewegung beginnt die automatische PWM-Erhoehung
-
-  float finePwmAbsEff = finePwmAbs;
-
-  const uint32_t stuckMs = (nowMs >= _noMoveSinceMs) ? (nowMs - _noMoveSinceMs) : 0;
-
-  // Sehr nahe am Ziel darf die automatische Fein-Kick-Erhoehung NICHT mehr eingreifen,
-  // sonst schiebt sie den Rotor genau im 0,1deg-Bereich unnötig ueber das Ziel.
-  const int32_t fineBoostMinErrDeg01 = (arriveTolDeg01 * 3 > 10) ? (arriveTolDeg01 * 3) : 10; // mindestens 0,10deg
-
-  if (stuckMs > fineNoMoveKickMs && absErrDeg > 0.05f && absErrDeg01 > fineBoostMinErrDeg01) {
-    // Obergrenze abhaengig vom Restfehler:
-    // - bei grossem Restfehler duerfen wir staerker "kicken"
-    // - nahe am Ziel nur wenig Extra
-    float extraCap = 5.0f + (5.0f * absErrDeg);  // 0.0deg -> +5%, 2.0deg -> +15%, 4.0deg -> +25%
-    extraCap = clampFloat(extraCap, 5.0f, 25.0f);
-
-    float maxFineAbs = finePwmAbs + extraCap;
-    if (maxFineAbs > pwmMax) maxFineAbs = pwmMax;
-
-    // PWM-Erhoehung ueber Zeit (Slew), bis Bewegung wieder einsetzt
-    const float boostSlewPerSec = 120.0f; // %/s
-    const float t = (float)(stuckMs - fineNoMoveKickMs) / 1000.0f;
-
-    finePwmAbsEff = finePwmAbs + (boostSlewPerSec * t);
-    finePwmAbsEff = clampFloat(finePwmAbsEff, finePwmAbs, maxFineAbs);
-  }
-
-  // Kurze Fahrten (1..2deg) liegen oft komplett im Feinfenster: volles Creep-PWM ist zu viel
-  // Schwung, v.a. in Minus-Richtung (mehr Nachlauf, dann Korrektur zurueck).
-  // Skalierung nach Restfehler relativ zur Feinzone; Wurzel = nahe am Ziel staerker drosseln.
-  if (fineWinDeg01 > 0) {
-    float ratio = (float)absErrDeg01 / (float)fineWinDeg01;
-    if (ratio > 1.0f) ratio = 1.0f;
-    float scale = sqrtf(ratio);
-    if (_moveDir < 0) {
-      scale *= 0.78f;
-    }
-    if (scale < 0.25f) scale = 0.25f;
-    finePwmAbsEff *= scale;
-    const float floorAbs = fmaxf(5.0f, finePwmAbs * 0.22f);
-    if (finePwmAbsEff < floorAbs) {
-      finePwmAbsEff = floorAbs;
-    }
-  }
-
-  const int8_t dir = (errDeg01 > 0) ? +1 : (errDeg01 < 0 ? -1 : 0);
-  const float uFine = (float)dir * finePwmAbsEff;
-
-  // In der Feinphase schnellere Slew-Rate, damit die Regelung "reaktiv" bleibt.
-  // (800%/s => 8% pro 10ms)
-  float dutyOutFine = applyPwmSlewCustom(uFine, _lastAppliedDuty, dtMs, 800.0f);
-  _lastAppliedDuty = dutyOutFine;
-
-  // Reglerzustaende neutral halten
-  _iTermPwm = 0.0f;
-  _pTermPwm = 0.0f;
-  _speedCmdDegPerSec = 0.0f;
-  _speedCmdRampDegPerSec = 0.0f;
-
-  return dutyOutFine;
-}
-
 
   // PWM-Slew (normal)
   float dutyOut = applyPwmSlew(uCmd, _lastAppliedDuty, dtMs);

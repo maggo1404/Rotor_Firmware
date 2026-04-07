@@ -298,12 +298,14 @@ static uint32_t g_endstopDebounceMs = 30;
 // bei normaler Fahrt, bei Anlaufspitze und bei Blockade auftreten.
 //
 // Typisches Vorgehen:
-// 1) g_currentMonitorEnabled=true, g_debug=true lassen.
-// 2) Normale Fahrten + Richtungswechsel ausfuehren und IS-Werte beobachten.
+// 1) Strommessung aktiv lassen (DEFAULT: an). Etappe2 hatte g_debug=true -> IS lief mit;
+//    hier ist g_currentMonitorEnabled absichtlich NICHT an g_debug gekoppelt, sonst bleiben
+//    GETIS/GETACCBINS dauerhaft 0 wenn g_debug=false.
+// 2) Normale Fahrten + Richtungswechsel ausfuehren und IS-Werte beobachten (optional g_debug=true).
 // 3) g_isHardStopMv so waehlen, dass normale Spitzen NICHT ausloesen, Blockade aber sicher ausloest.
 // 4) g_isSoftWarnMv typischerweise bei ca. 70..90% von g_isHardStopMv setzen.
 //
-static bool     g_currentMonitorEnabled = g_debug;
+static bool     g_currentMonitorEnabled = true;
 static uint32_t g_isSoftWarnMv = 250;     // Warnschwelle (mV) -> nur Warnung/Log, KEIN Stop
 static uint32_t g_isHardStopMv = 350;    // Abschaltschwelle (mV) -> Fault + Motor aus
 static uint32_t g_isGraceMs = 200;        // Schonzeit nach Start/Umkehr (ms): HardStop wird ignoriert
@@ -516,17 +518,13 @@ static float g_tempWarnMotorC   = 0.0f;
 static float g_coldTempDegC       = 5.0f;
 static float g_coldExtraDragPct   = 10.0f;
 
-// Kalibrierung/Statistik: Ignorier-Rampe (Grad)
-// - In diesem Bereich am Start/Ende werden Stromwerte NICHT gesammelt,
-//   damit Beschleunigen/Abbremsen die Statistik nicht verfalscht.
+// Zusaetzliche Ignorier-Rampe (SETCALIGNDG/cig); effektiv max(ramp, cal) fuer Live-Bins/Kalibrierung.
 static float g_calIgnoreRampDeg = 10.0f;
 
-// Live-Statistik: Mindestweg (Grad), damit eine Fahrt ausgewertet wird.
-// Default passend zu g_rampDistDeg=30: erst ab ~60deg macht eine Cruise-Phase Sinn.
-static float g_statMinMoveDeg = 60.0f;
+// Mindestweg (Grad) fuer Live/Acc-Bins und GETLOADSTAT/GETWIND (SETSTATMINDG/smm).
+static float g_statMinMoveDeg = 15.0f;
 
-// Schnelle Accu-Statistik (GETACCBINS): ignorierter Rampenbereich in Grad.
-// Dieser Wert ist unabhaengig von der normalen Rampenlaenge und kann vom Master gestellt werden.
+// GETACCBINS: separater Ignore (SETRAPDG/rap), Standard 5deg.
 static float g_accIgnoreRampDeg = 5.0f;
 
 // Mechanische Reibung / Getriebe: Schwellwerte
@@ -1322,7 +1320,9 @@ dcfg.restartAtMs      = &g_restartAtMs;
     Serial.print(" motEn="); Serial.print(g_motorTempSensorEnabled ? 1 : 0);
     Serial.print(" swap="); Serial.println(g_tempSwapSensors ? 1 : 0);
 
-    Serial.print("[LOAD] calIgnoreDeg="); Serial.print(g_calIgnoreRampDeg, 1);
+    Serial.print("[LOAD] ramp="); Serial.print(g_rampDistDeg, 2);
+    Serial.print(" calIg="); Serial.print(g_calIgnoreRampDeg, 1);
+    Serial.print(" accIg="); Serial.print(g_accIgnoreRampDeg, 1);
     Serial.print(" statMinDeg="); Serial.print(g_statMinMoveDeg, 0);
     Serial.print(" dragWarn%="); Serial.print(g_dragWarnPct, 1);
     Serial.print(" dragBins%="); Serial.print(g_dragWarnBinsPct, 1);

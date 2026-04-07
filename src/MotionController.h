@@ -302,27 +302,17 @@ uint32_t _brakeHoldStartMs = 0;
   long _lastMoveCounts = 0;
   uint32_t _noMoveSinceMs = 0;
 
-  // Feinphase (Creep + aktive Bremse):
-  // _motorBrakeRequested wird in update() gesetzt und in der INO ausgewertet,
-  // damit Safety/Fault-Logik immer Vorrang hat.
+  // Feinphase: _motorBrakeRequested bleibt false (keine aktive Zwischenbremse mehr);
+  // wird in der INO ausgewertet, falls spaeter wieder genutzt.
   bool _motorBrakeRequested = false;
 
-  // Hold nach Bremse in der Feinphase: wir halten die aktive Bremse fuer eine
-  // kurze Zeit (fineBrakeHoldMs), damit der Motor wirklich sauber stehen bleibt.
+  // Legacy-Merker (frueher Lead-/Fenbremse und LOW-Zwischenhalt); werden bei Reset/SetPos geloescht.
   bool _fineBrakeHoldActive = false;
   uint32_t _fineBrakeHoldStartMs = 0;
 
-  // Joerg: Wenn das Ziel-/Toleranzfenster getroffen wird, stoppen wir den Motor
-  // bewusst mit 0 PWM (beide H-Bruecken LOW ueber stopPwm()) statt weiter
-  // hineinzukriechen. Dadurch wird das Ueberfahren und anschliessende Korrigieren
-  // deutlich reduziert.
   bool _fineLowStopHoldActive = false;
   uint32_t _fineLowStopHoldStartMs = 0;
 
-  // Optionales "Lead-Bremsen" (fineBrakeLeadDeg01):
-  // Wenn wir einmal vor dem Ziel gebremst haben, duerfen wir nicht in jedem Loop
-  // erneut bremsen, sonst bleibt er kurz vor dem Ziel stehen.
-  // Dieser Merker wird pro Positionsfahrt zurueckgesetzt.
   bool _fineLeadBrakeUsed = false;
 
   // ------------------------------------------------------------

@@ -121,12 +121,12 @@ void LoadMonitor::begin(Preferences* prefs,
 }
 
 float LoadMonitor::effectiveIgnoreDeg() const {
-  // Wir ignorieren Rampen, damit Beschleunigung/Abbremsen die Stromwerte nicht verfalscht.
+  // Wie Etappe2: max(rampDistDeg, calIgnoreRampDeg), Obergrenze 60deg.
   const float ramp = safeFPtr(_cfg.rampDistDeg, 30.0f);
   const float extra = safeFPtr(_cfg.calIgnoreRampDeg, 10.0f);
   float ig = (ramp > extra) ? ramp : extra;
   if (ig < 0.0f) ig = 0.0f;
-  if (ig > 60.0f) ig = 60.0f; // Schutz
+  if (ig > 60.0f) ig = 60.0f;
   return ig;
 }
 
@@ -166,7 +166,15 @@ void LoadMonitor::update(uint32_t nowMs) {
     } else if (_stage == ST_RUN_CCW) {
       mvCalOrLive = (uint16_t)clampFloat((float)is.avg2, 0.0f, 65535.0f);
     } else if (_liveMoveActive) {
-      const uint16_t mvDir = (uint16_t)clampFloat((float)((_liveDir > 0) ? is.avg1 : is.avg2), 0.0f, 65535.0f);
+      const uint16_t a1 =
+          (uint16_t)clampFloat((float)is.avg1, 0.0f, 65535.0f);
+      const uint16_t a2 =
+          (uint16_t)clampFloat((float)is.avg2, 0.0f, 65535.0f);
+      uint16_t mvDir = (_liveDir > 0) ? a1 : a2;
+      // Ein-Shunt / asymmetrische Messung: wenn Richtungskanal 0, anderen Kanal nutzen
+      if (mvDir == 0 && _liveDir != 0 && (a1 > 0 || a2 > 0)) {
+        mvDir = (a1 >= a2) ? a1 : a2;
+      }
       mvCalOrLive = mvDir;
       mvAcc = mvDir;
     }
@@ -211,7 +219,6 @@ void LoadMonitor::update(uint32_t nowMs) {
         const float igDeg = effectiveIgnoreDeg();
         const int32_t igDeg01 = (int32_t)(igDeg * 100.0f + 0.5f);
 
-        // Messfenster: Start+ignore ... Ziel-ignore (je nach Richtung)
         bool inWindow = false;
         if (_liveDir > 0) {
           int32_t lo = _liveStartDeg01 + igDeg01;
@@ -668,6 +675,12 @@ void LoadMonitor::accAccumulateSample(uint8_t dir, uint8_t bin, uint16_t mv) {
 void LoadMonitor::liveEvaluateAndWarn() {
   // Nur sinnvoll, wenn Baseline existiert
   if (!_calValid) return;
+
+  // Reibung/Wind nur bei Fahrten ab statMinMoveDeg (gleiche Schwelle wie Live/Acc-Bins, Etappe2).
+  const float statMinMoveDeg = safeFPtr(_cfg.statMinMoveDeg, 5.0f);
+  const int32_t statMinMoveDeg01 = (int32_t)(statMinMoveDeg * 100.0f + 0.5f);
+  const int32_t moveDistDeg01 = abs(_liveTargetDeg01 - _liveStartDeg01);
+  if (moveDistDeg01 < statMinMoveDeg01) return;
 
   // Temperatur-Kompensation (kalt -> mehr Reibung ist "ok")
   float tempC = 0.0f;

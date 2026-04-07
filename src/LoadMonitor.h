@@ -21,18 +21,16 @@ enum LoadCalPublicState : uint8_t {
 
 // Pointer-Konfiguration (Werte liegen in der .ino als g_* Variablen)
 struct LoadMonitorConfigPointers {
-  // Rampenlaenge der normalen Positionsfahrt (Grad)
+  // Rampenlaenge Positionsfahrt (Grad), wie MotionController (SETRAMP / NVS "ramp").
   float* rampDistDeg = nullptr;
 
-  // Zusaetzliche feste Ignorier-Rampe (Grad) fuer Messung (Kalibrierung + Live-Stat)
-  // Effektiv wird max(rampDistDeg, calIgnoreRampDeg) genutzt.
+  // Zusaetzliche Ignorier-Rampe (Grad), SETCALIGNDG/cig. Effektiv: max(rampDistDeg, calIgnoreRampDeg).
   float* calIgnoreRampDeg = nullptr;
 
-  // Mindestweg fuer Statistik (kleine Bewegungen werden ignoriert)
+  // Mindestweg (Grad): Live/Acc-Bins + Auswertung GETLOADSTAT/GETWIND (wie Etappe2).
   float* statMinMoveDeg = nullptr;
 
-  // Schnelle Accu-Statistik (GETACCBINS): ignorierter Rampenbereich in Grad.
-  // Dieser Wert ist unabhaengig von rampDistDeg/calIgnoreRampDeg und wird vom Master gesetzt.
+  // GETACCBINS: separater Ignore (SETRAPDG/rap), unabhaengig von ramp/cal.
   float* accIgnoreRampDeg = nullptr;
 
   // Unterhalb coldTempDegC erlauben wir zusaetzliche Reibung (in Prozent)
