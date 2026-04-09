@@ -1,0 +1,47 @@
+name: PlatformIO Build
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Cache PlatformIO
+      uses: actions/cache@v4
+      with:
+        path: ~/.platformio
+        key: ${{ runner.os }}-platformio-${{ hashFiles('**/platformio.ini') }}
+        restore-keys: |
+          ${{ runner.os }}-platformio-
+          
+    - name: Install PlatformIO
+      run: |
+        pip install platformio
+        
+    - name: Build PlatformIO Project
+      run: |
+        pio run --environment esp32-s3-n8r8
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-bin
+        path: |
+          .pio/build/esp32-s3-n8r8/firmware.bin
+          .pio/build/esp32-s3-n8r8/firmware.elf
+          .pio/build/esp32-s3-n8r8/partitions.bin
+          .pio/build/esp32-s3-n8r8/bootloader.bin
+        if-no-files-found: warn
