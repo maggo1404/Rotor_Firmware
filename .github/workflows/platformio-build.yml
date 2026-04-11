@@ -1,8 +1,10 @@
-name: PlatformIO Build
+name: PlatformIO Build & Release
 
 on:
   push:
     branches: [ main, master, develop ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main, master, develop ]
 
@@ -45,3 +47,60 @@ jobs:
           .pio/build/esp32-s3-n8r8/partitions.bin
           .pio/build/esp32-s3-n8r8/bootloader.bin
         if-no-files-found: warn
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: firmware-bin
+        path: firmware/
+        
+    - name: Create Release Package
+      run: |
+        cd firmware
+        zip -r ../Rotor_Firmware_${{ github.ref_name }}.zip .
+        cd ..
+        
+    - name: Generate Release Notes
+      run: |
+        echo "## Rotor Firmware ${{ github.ref_name }}" > RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "### Hardware" >> RELEASE_NOTES.md
+        echo "- MCU: ESP32-S3 (8MB Flash, 8MB PSRAM)" >> RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "### Enthaltene Dateien" >> RELEASE_NOTES.md
+        echo "- \`firmware.bin\` - Hauptfirmware" >> RELEASE_NOTES.md
+        echo "- \`bootloader.bin\` - Bootloader" >> RELEASE_NOTES.md
+        echo "- \`partitions.bin\` - Partitionstabelle" >> RELEASE_NOTES.md
+        echo "- \`firmware.elf\` - Debug-Symbole" >> RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "### Installation" >> RELEASE_NOTES.md
+        echo '```bash' >> RELEASE_NOTES.md
+        echo "# Mit PlatformIO" >> RELEASE_NOTES.md
+        echo "pio run --target upload" >> RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "# Mit esptool" >> RELEASE_NOTES.md
+        echo "esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash 0x0 firmware.bin" >> RELEASE_NOTES.md
+        echo '```' >> RELEASE_NOTES.md
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: "Rotor Firmware ${{ github.ref_name }}"
+        body_path: RELEASE_NOTES.md
+        files: |
+          Rotor_Firmware_${{ github.ref_name }}.zip
+          firmware/firmware.bin
+          firmware/bootloader.bin
+          firmware/partitions.bin
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
